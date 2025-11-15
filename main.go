@@ -35,8 +35,6 @@ type ApiResponse struct {
 	NextPageToken    string            `json:"nextPageToken,omitempty"`
 }
 
-const UNIVERSE_ID = "6749060816"
-
 var API_URI = "https://apis.roblox.com/cloud/v2/universes/%s/user-restrictions?maxPageSize=100&pageToken=%s"
 
 func robloxRequest(method, uri string, body io.Reader) (*http.Response, error) {
@@ -57,6 +55,10 @@ func robloxRequest(method, uri string, body io.Reader) (*http.Response, error) {
 }
 
 func generateCsv() {
+	var universeId string
+	fmt.Printf("Universe ID: ")
+	fmt.Scanln(&universeId)
+
 	fmt.Println("Querying all bans...")
 
 	file, err := os.OpenFile("bans.csv", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
@@ -74,7 +76,7 @@ func generateCsv() {
 	var nextPageToken = ""
 	var count = 0
 	for {
-		res, err := robloxRequest(http.MethodGet, fmt.Sprintf(API_URI, UNIVERSE_ID, nextPageToken), nil)
+		res, err := robloxRequest(http.MethodGet, fmt.Sprintf(API_URI, universeId, nextPageToken), nil)
 		if err != nil {
 			panic(err)
 		}

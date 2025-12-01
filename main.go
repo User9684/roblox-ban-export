@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -61,12 +62,34 @@ func generateCsv() {
 
 	fmt.Println("Querying all bans...")
 
-	file, err := os.OpenFile("bans.csv", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+	path := fmt.Sprintf("%s-bans.csv", universeId)
+	tmpPath := path + ".tmp"
+
+	var old *os.File
+	var oldReader *csv.Reader
+	var oldNewest []string
+	var err error
+	if _, err = os.Stat(path); err == nil {
+		old, err = os.Open(path)
+		if err != nil {
+			panic(err)
+		}
+
+		oldReader = csv.NewReader(old)
+
+		oldReader.Read() // Skip header, we dont gaf
+		oldNewest, err = oldReader.Read()
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	tmp, err := os.Create(tmpPath)
 	if err != nil {
 		panic(err)
 	}
 
-	var writer = csv.NewWriter(file)
+	var writer = csv.NewWriter(tmp)
 
 	writer.Write([]string{
 		"UserId", "Moderator", "Reason",
@@ -75,6 +98,7 @@ func generateCsv() {
 
 	var nextPageToken = ""
 	var count = 0
+top:
 	for {
 		res, err := robloxRequest(http.MethodGet, fmt.Sprintf(API_URI, universeId, nextPageToken), nil)
 		if err != nil {
@@ -102,8 +126,6 @@ func generateCsv() {
 		decoder.Decode(&data)
 
 		for i, restriction := range data.UserRestrictions {
-			count += 1
-
 			userId := strings.Split(restriction.User, "/")[1]
 
 			var gameRestriction = restriction.Restriction
@@ -133,6 +155,12 @@ func generateCsv() {
 				duration = *gameRestriction.Duration
 			}
 
+			if len(oldNewest) >= 2 && oldNewest[0] == userId && oldNewest[1] == moderator {
+				fmt.Println("Stopped scanning due to reaching the old newest!")
+				break top
+			}
+
+			count += 1
 			writer.Write([]string{
 				userId, moderator, reason,
 				gameRestriction.DisplayedReason, gameRestriction.StartTime.String(), duration,
@@ -151,7 +179,37 @@ func generateCsv() {
 		}
 	}
 
+	if old != nil {
+		writer.Write(oldNewest)
+
+		var rewriteCount = 0
+		for {
+			record, err := oldReader.Read()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				panic(err)
+			}
+
+			writer.Write(record)
+			rewriteCount += 1
+
+			if rewriteCount%25 == 0 {
+				writer.Flush()
+			}
+		}
+	}
+
 	writer.Flush()
+
+	if old != nil {
+		old.Close()
+	}
+	tmp.Close()
+	if err := os.Rename(tmpPath, path); err != nil {
+		panic(err)
+	}
 
 	fmt.Printf("Finished querying bans! Total ban count: %d\n", count)
 }
